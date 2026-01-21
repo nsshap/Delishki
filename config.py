@@ -7,9 +7,14 @@ from dotenv import load_dotenv
 # Get the directory where this config file is located
 BASE_DIR = Path(__file__).parent.resolve()
 
-# Load .env file from the project root
+# Load .env file from the project root (if exists)
+# This allows the bot to work both locally (with .env) and in Docker (with env vars)
 env_path = BASE_DIR / '.env'
-load_dotenv(dotenv_path=env_path, override=True)
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path, override=True)
+else:
+    # Try to load from environment variables (for Docker deployment)
+    load_dotenv(override=True)
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -27,30 +32,32 @@ def validate_config():
     """Validate that all required configuration variables are set."""
     errors = []
     
-    # Check if .env file exists
-    if not env_path.exists():
-        print(f"❌ Файл .env не найден по пути: {env_path}")
-        print(f"💡 Создайте файл .env в корне проекта ({BASE_DIR})")
-        sys.exit(1)
-    
-    # Check each required variable
+    # Check each required variable (works with both .env file and environment variables)
     if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "your_telegram_bot_token_here":
-        errors.append("❌ TELEGRAM_BOT_TOKEN не установлен или пуст в файле .env")
+        errors.append("❌ TELEGRAM_BOT_TOKEN не установлен или пуст")
     
     if not OPENAI_API_KEY or OPENAI_API_KEY == "your_openai_api_key_here":
-        errors.append("❌ OPENAI_API_KEY не установлен или пуст в файле .env")
+        errors.append("❌ OPENAI_API_KEY не установлен или пуст")
     
     if not NOTION_API_KEY or NOTION_API_KEY == "your_notion_api_key_here":
-        errors.append("❌ NOTION_API_KEY не установлен или пуст в файле .env")
+        errors.append("❌ NOTION_API_KEY не установлен или пуст")
     
     if not NOTION_DATABASE_ID or NOTION_DATABASE_ID == "your_notion_database_id_here":
-        errors.append("❌ NOTION_DATABASE_ID не установлен или пуст в файле .env")
+        errors.append("❌ NOTION_DATABASE_ID не установлен или пуст")
     
     if errors:
         print("\n".join(errors))
-        print(f"\n💡 Проверьте файл .env по пути: {env_path}")
-        print("   Убедитесь, что все переменные заполнены и не содержат лишних пробелов или кавычек.")
-        print("   Формат должен быть: TELEGRAM_BOT_TOKEN=ваш_токен")
+        if env_path.exists():
+            print(f"\n💡 Проверьте файл .env по пути: {env_path}")
+            print("   Убедитесь, что все переменные заполнены и не содержат лишних пробелов или кавычек.")
+            print("   Формат должен быть: TELEGRAM_BOT_TOKEN=ваш_токен")
+        else:
+            print(f"\n💡 Установите переменные окружения:")
+            print("   - TELEGRAM_BOT_TOKEN")
+            print("   - OPENAI_API_KEY")
+            print("   - NOTION_API_KEY")
+            print("   - NOTION_DATABASE_ID")
+            print("   Или создайте файл .env в корне проекта с этими переменными.")
         sys.exit(1)
 
 # Categories

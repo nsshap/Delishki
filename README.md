@@ -50,11 +50,39 @@ pip install -r requirements.txt
 
 ## Запуск
 
+### Локальный запуск
+
 ```bash
 python bot.py
 ```
 
 Бот начнет слушать все сообщения, отправленные ему напрямую, и автоматически обрабатывать их.
+
+### Запуск через Docker
+
+1. **Соберите Docker образ:**
+   ```bash
+   docker build -t delishki-bot .
+   ```
+
+2. **Запустите контейнер:**
+   ```bash
+   docker run -d \
+     --name delishki-bot \
+     --restart unless-stopped \
+     --env-file .env \
+     delishki-bot
+   ```
+
+   Или используйте docker-compose:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Проверьте логи:**
+   ```bash
+   docker logs -f delishki-bot
+   ```
 
 ## Использование
 
@@ -77,8 +105,10 @@ Delishki/
 ├── image_processor.py        # Обработка изображений (LLM Vision API)
 ├── llm_categorizer.py        # Категоризация через LLM
 ├── notion_storage.py         # Интеграция с Notion
-├── storage_factory.py       # Фабрика для создания хранилища
+├── storage_factory.py        # Фабрика для создания хранилища
 ├── requirements.txt          # Зависимости
+├── Dockerfile                # Docker образ для деплоя
+├── docker-compose.yml        # Docker Compose конфигурация
 └── README.md                # Документация
 ```
 
@@ -97,7 +127,19 @@ Delishki/
 
 Бот можно задеплоить на различные платформы. Ниже инструкции для самых популярных вариантов.
 
-### Railway (Рекомендуется)
+### 🐳 Docker (Рекомендуется)
+
+Бот готов к деплою через Docker. Просто используйте `Dockerfile` на любой платформе, поддерживающей Docker:
+
+- **Railway** - автоматически определит Dockerfile
+- **Render** - выберите "Docker" как тип сервиса
+- **Fly.io** - используйте `fly launch` (автоматически определит Dockerfile)
+- **DigitalOcean App Platform** - выберите "Dockerfile" как способ деплоя
+- **VPS** - запустите `docker build` и `docker run` на вашем сервере
+
+Подробные инструкции в файле [DEPLOY.md](DEPLOY.md).
+
+### Railway
 
 1. Зарегистрируйтесь на [Railway](https://railway.app)
 2. Создайте новый проект и подключите GitHub репозиторий
@@ -178,5 +220,3 @@ Delishki/
 - Обработка изображений выполняется через OpenAI Vision API (gpt-4o), что обеспечивает высокое качество распознавания текста и понимания контекста
 - Бот обрабатывает все сообщения, отправленные ему напрямую (не требуется настройка канала)
 - Все рекомендации сохраняются в Notion базу данных
-
-# Delishki

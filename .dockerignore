@@ -11,7 +11,12 @@ ENV/
 .git
 .gitignore
 README.md
+DEPLOY.md
 .vscode/
 .idea/
 *.log
 .DS_Store
+*.md
+docker-compose.yml
+.dockerignore
+Dockerfile
