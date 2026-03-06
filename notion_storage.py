@@ -104,13 +104,20 @@ class NotionStorage:
     def get_by_category(self, category: str) -> list:
         """Get all items for a given category."""
         try:
-            response = self.client.databases.query(
-                database_id=self.database_id,
-                filter={"property": "Category", "select": {"equals": category}},
-                sorts=[{"property": "Timestamp", "direction": "descending"}]
+            response = requests.post(
+                f"https://api.notion.com/v1/databases/{self.database_id}/query",
+                headers={
+                    "Authorization": f"Bearer {NOTION_API_KEY}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "filter": {"property": "Category", "select": {"equals": category}},
+                    "sorts": [{"property": "Timestamp", "direction": "descending"}]
+                }
             )
             results = []
-            for page in response.get("results", []):
+            for page in response.json().get("results", []):
                 props = page["properties"]
                 title = props.get("Title", {}).get("title", [{}])
                 context = props.get("Context", {}).get("rich_text", [{}])
