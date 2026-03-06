@@ -21,23 +21,27 @@ class RecommendationBot:
         match = url_pattern.search(text)
         return match.group(0) if match else ""
 
-    async def show_category(self, update: Update, category: str):
+    async def show_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE, category: str):
         """Show all items for a given category."""
         from telegram import InputMediaPhoto
         items = self.storage.get_by_category(category)
         if not items:
             await update.message.reply_text(f"Список *{category}* пуст.", parse_mode="Markdown")
+            context.user_data["last_shown"] = {"category": category, "items": []}
             return
+        # Save context for follow-up commands
+        all_items_with_ids = self.storage.get_all_in_category(category)
+        context.user_data["last_shown"] = {"category": category, "items": all_items_with_ids}
         lines = [f"*{category}* ({len(items)}):\n"]
         images = []
-        for item in items:
+        for i, item in enumerate(items, 1):
             title = item.get("title", "") or "Без названия"
             url = item.get("url", "")
             image_url = item.get("image_url", "")
             if url:
-                lines.append(f"• [{title}]({url})")
+                lines.append(f"{i}. [{title}]({url})")
             else:
-                lines.append(f"• {title}")
+                lines.append(f"{i}. {title}")
             if image_url:
                 images.append(image_url)
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
@@ -53,14 +57,19 @@ class RecommendationBot:
     async def handle_delete(self, update: Update, context: ContextTypes.DEFAULT_TYPE, delete_req: dict):
         """Handle delete request."""
         action = delete_req.get("action")
-        category = delete_req.get("category")
+        last_shown = context.user_data.get("last_shown", {})
+
+        # Resolve category: explicit or from context
+        category = delete_req.get("category") or last_shown.get("category")
+        if not category:
+            await update.message.reply_text("Не понятно из какого списка удалять. Сначала покажи список — например, 'покажи список продуктов'.")
+            return
 
         if action == "clear_list":
             all_items = self.storage.get_all_in_category(category)
             if not all_items:
                 await update.message.reply_text(f"Список *{category}* уже пуст.", parse_mode="Markdown")
                 return
-            # Ask for confirmation
             context.user_data["pending_clear"] = {"category": category, "ids": [i["id"] for i in all_items]}
             keyboard = [[
                 InlineKeyboardButton("✅ Да, удалить всё", callback_data="clear_confirm"),
@@ -71,6 +80,26 @@ class RecommendationBot:
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
+
+        elif action == "delete_by_position":
+            positions = delete_req.get("positions", [])
+            items_in_context = last_shown.get("items", [])
+            if not items_in_context:
+                await update.message.reply_text("Сначала покажи список, чтобы я знала нумерацию.")
+                return
+            ids_to_delete = []
+            deleted_titles = []
+            for pos in positions:
+                if 0 < pos <= len(items_in_context):
+                    item = items_in_context[pos - 1]
+                    ids_to_delete.append(item["id"])
+                    deleted_titles.append(f"{pos}. {item['title']}")
+            if not ids_to_delete:
+                await update.message.reply_text("Не нашла пунктов с такими номерами.")
+                return
+            self.storage.delete_pages(ids_to_delete)
+            lines = [f"✅ Удалено:"] + [f"• {t}" for t in deleted_titles]
+            await update.message.reply_text("\n".join(lines))
 
         elif action == "delete_items":
             requested = delete_req.get("items", [])
@@ -121,7 +150,7 @@ class RecommendationBot:
             if "покажи" in msg or "что " in msg:
                 category = self.categorizer.identify_show_category(update.message.text)
                 if category:
-                    await self.show_category(update, category)
+                    await self.show_category(update, context, category)
                     return
 
         # Process text message

@@ -69,33 +69,37 @@ class LLMCategorizer:
         """Detect if user wants to delete items. Returns {action, category, items} or None."""
         prompt = f"""Пользователь написал: "{text}"
 
-Он хочет удалить/вычеркнуть что-то из списка? Возможные варианты:
-- удалить конкретные пункты: "удали картошку", "я уже купила фейри", "я сделала позвонить врачу", "купила и картошку и молоко"
-- очистить весь список: "очисти весь список продуктов", "удали весь список дел"
+Он хочет удалить что-то из списка?
 
-Категории и их алиасы:
+Возможные действия:
+- "delete_items" — удалить конкретные пункты по названию
+- "delete_by_position" — удалить пункты по номеру (первый, второй, 1, 2, ...)
+- "clear_list" — очистить весь список
+
+Категории (если не указана явно — верни null, используем контекст):
 - GroceryList: список продуктов, продукты, покупки, список покупок
-- PersonalTodoList: мои дела, мои задачи, личные дела, список дел
-- FamilyTodoList: дела с Сашей, семейные дела, наши дела, совместные дела
+- PersonalTodoList: мои дела, мои задачи, личные дела
+- FamilyTodoList: дела с Сашей, семейные дела, наши дела
 
-Если это запрос на удаление — верни JSON:
+Верни JSON:
 {{
-  "action": "delete_items" или "clear_list",
-  "category": "название категории",
-  "items": ["что удалить 1", "что удалить 2"]
+  "action": "delete_items" | "delete_by_position" | "clear_list" | null,
+  "category": "название категории или null",
+  "items": ["название1", "название2"],
+  "positions": [1, 2, 4]
 }}
 
-Если это НЕ запрос на удаление — верни {{"action": null}}
-
 Примеры:
-- "удали картошку из списка" → {{"action": "delete_items", "category": "GroceryList", "items": ["картошка"]}}
-- "я уже купила фейри и молоко" → {{"action": "delete_items", "category": "GroceryList", "items": ["фейри", "молоко"]}}
-- "купила и картошку и фейри" → {{"action": "delete_items", "category": "GroceryList", "items": ["картошка", "фейри"]}}
-- "я уже сделала позвонить врачу" → {{"action": "delete_items", "category": "PersonalTodoList", "items": ["позвонить врачу"]}}
-- "очисти весь список продуктов" → {{"action": "clear_list", "category": "GroceryList", "items": []}}
-- "удали все мои дела" → {{"action": "clear_list", "category": "PersonalTodoList", "items": []}}
-- "добавь картошку" → {{"action": null}}
-- "покажи фильмы" → {{"action": null}}"""
+- "удали картошку из списка продуктов" → {{"action": "delete_items", "category": "GroceryList", "items": ["картошка"], "positions": []}}
+- "я уже купила фейри и молоко" → {{"action": "delete_items", "category": "GroceryList", "items": ["фейри", "молоко"], "positions": []}}
+- "удали первый пункт" → {{"action": "delete_by_position", "category": null, "items": [], "positions": [1]}}
+- "удали первый, второй и четвёртый" → {{"action": "delete_by_position", "category": null, "items": [], "positions": [1, 2, 4]}}
+- "удали 1, 3, 5" → {{"action": "delete_by_position", "category": null, "items": [], "positions": [1, 3, 5]}}
+- "удали из этого списка картошку" → {{"action": "delete_items", "category": null, "items": ["картошка"], "positions": []}}
+- "очисти весь список продуктов" → {{"action": "clear_list", "category": "GroceryList", "items": [], "positions": []}}
+- "очисти этот список" → {{"action": "clear_list", "category": null, "items": [], "positions": []}}
+- "добавь картошку" → {{"action": null, "category": null, "items": [], "positions": []}}
+- "покажи фильмы" → {{"action": null, "category": null, "items": [], "positions": []}}"""
 
         try:
             response = self.client.chat.completions.create(
