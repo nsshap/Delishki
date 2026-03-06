@@ -4,6 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, validate_config
 from image_processor import process_image_message
+from audio_processor import transcribe_audio
 from llm_categorizer import LLMCategorizer
 from storage_factory import get_storage
 
@@ -153,6 +154,16 @@ class RecommendationBot:
         image_bytes = None
         image_file_url = None
 
+        # Transcribe voice/audio to text
+        if update.message.voice or update.message.audio:
+            transcribed = await transcribe_audio(update, context)
+            if not transcribed:
+                await update.message.reply_text("Не удалось распознать аудио.")
+                return
+            # Inject as text and process normally
+            update.message.text = transcribed
+            await update.message.reply_text(f"🎤 Распознано: {transcribed}")
+
         # Check for delete/show/add commands
         if update.message.text:
             msg = update.message.text.lower()
@@ -270,7 +281,7 @@ class RecommendationBot:
         try:
             application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
             
-            application.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, self.handle_message))
+            application.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO, self.handle_message))
             application.add_handler(CallbackQueryHandler(self.handle_clear_callback, pattern="^clear_"))
 
             print("Bot is running...")
