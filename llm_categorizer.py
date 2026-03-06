@@ -65,6 +65,50 @@ class LLMCategorizer:
             print(f"Error identifying show category: {e}")
             return None
 
+    def identify_bulk_add(self, text: str, context_category: str = None) -> dict | None:
+        """Detect if user wants to add multiple items to a list. Returns {category, items} or None."""
+        context_hint = f"Последний показанный список: {context_category}." if context_category else ""
+        prompt = f"""Пользователь написал: "{text}"
+{context_hint}
+
+Он хочет добавить один или несколько пунктов в список? Списки это: GroceryList, PersonalTodoList, FamilyTodoList.
+
+Категории и их алиасы:
+- GroceryList: список продуктов, продукты, покупки — еда, напитки, бытовая химия
+- PersonalTodoList: мои дела, мои задачи, личные дела
+- FamilyTodoList: дела с Сашей, семейные дела, наши дела
+
+Если это запрос на добавление — верни JSON:
+{{"category": "название категории", "items": ["пункт1", "пункт2"]}}
+
+Если это НЕ запрос на добавление в список — верни {{"category": null, "items": []}}
+
+Примеры:
+- "добавь картошку, молоко и хлеб" → {{"category": "GroceryList", "items": ["картошка", "молоко", "хлеб"]}}
+- "добавь в список продуктов: фейри, губка, яйца" → {{"category": "GroceryList", "items": ["фейри", "губка", "яйца"]}}
+- "добавь в мои дела: записаться к врачу, оплатить счёт" → {{"category": "PersonalTodoList", "items": ["записаться к врачу", "оплатить счёт"]}}
+- "картошка, молоко, хлеб" (если context_category=GroceryList) → {{"category": "GroceryList", "items": ["картошка", "молоко", "хлеб"]}}
+- "посмотреть фильм про любовь" → {{"category": null, "items": []}}
+- "удали картошку" → {{"category": null, "items": []}}"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Отвечай только валидным JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0
+            )
+            result = json.loads(response.choices[0].message.content)
+            if not result.get("category") or not result.get("items"):
+                return None
+            return result
+        except Exception as e:
+            print(f"Error identifying bulk add: {e}")
+            return None
+
     def identify_delete_request(self, text: str) -> dict | None:
         """Detect if user wants to delete items. Returns {action, category, items} or None."""
         prompt = f"""Пользователь написал: "{text}"

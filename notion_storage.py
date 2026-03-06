@@ -134,6 +134,22 @@ class NotionStorage:
             print(f"Error fetching category {category}: {e}")
             return []
 
+    def quick_save(self, category: str, title: str) -> bool:
+        """Save a single item with just title and category."""
+        try:
+            self.client.pages.create(
+                parent={"database_id": self.database_id},
+                properties={
+                    "Title": {"title": [{"text": {"content": title}}]},
+                    "Category": {"select": {"name": category}},
+                    "Timestamp": {"date": {"start": datetime.now().isoformat()}}
+                }
+            )
+            return True
+        except Exception as e:
+            print(f"Error quick saving {title}: {e}")
+            return False
+
     def get_all_in_category(self, category: str) -> list:
         """Get all items (id + title) for a category."""
         try:

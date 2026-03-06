@@ -54,6 +54,21 @@ class RecommendationBot:
                 except Exception as e:
                     print(f"Error sending images: {e}")
 
+    async def handle_bulk_add(self, update: Update, bulk: dict):
+        """Save multiple items to a list category."""
+        category = bulk["category"]
+        items = bulk["items"]
+        saved, failed = [], []
+        for item in items:
+            if self.storage.quick_save(category, item):
+                saved.append(item)
+            else:
+                failed.append(item)
+        lines = [f"✅ Добавлено в *{category}* ({len(saved)}):"] + [f"• {t}" for t in saved]
+        if failed:
+            lines += [f"\n❌ Не удалось добавить:"] + [f"• {t}" for t in failed]
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
     async def handle_delete(self, update: Update, context: ContextTypes.DEFAULT_TYPE, delete_req: dict):
         """Handle delete request."""
         action = delete_req.get("action")
@@ -138,15 +153,27 @@ class RecommendationBot:
         image_bytes = None
         image_file_url = None
 
-        # Check for delete/show commands
+        # Check for delete/show/add commands
         if update.message.text:
             msg = update.message.text.lower()
+            last_shown = context.user_data.get("last_shown", {})
+
             delete_triggers = ["удали", "удалить", "вычеркни", "уже купила", "уже купил", "уже сделала", "уже сделал", "очисти", "убери"]
+            add_triggers = ["добавь", "добавить", "добавляй", "купи ", "купить "]
+
             if any(t in msg for t in delete_triggers):
                 delete_req = self.categorizer.identify_delete_request(update.message.text)
                 if delete_req:
                     await self.handle_delete(update, context, delete_req)
                     return
+
+            if any(t in msg for t in add_triggers) or (last_shown.get("category") and ("," in msg or "\n" in msg)):
+                context_category = last_shown.get("category")
+                bulk = self.categorizer.identify_bulk_add(update.message.text, context_category)
+                if bulk:
+                    await self.handle_bulk_add(update, bulk)
+                    return
+
             if "покажи" in msg or "что " in msg:
                 category = self.categorizer.identify_show_category(update.message.text)
                 if category:
