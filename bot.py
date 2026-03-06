@@ -21,6 +21,19 @@ class RecommendationBot:
         match = url_pattern.search(text)
         return match.group(0) if match else ""
 
+    async def show_grocery_list(self, update: Update):
+        """Show all items in GroceryList category."""
+        items = self.storage.get_by_category("GroceryList")
+        if not items:
+            await update.message.reply_text("🛒 Список продуктов пуст.")
+            return
+        lines = ["🛒 *Список продуктов:*\n"]
+        for item in items:
+            title = item.get("title", "")
+            context = item.get("context", "")
+            lines.append(f"• {title}" + (f" — {context}" if context else ""))
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages."""
         # Process all direct messages to the bot
@@ -29,6 +42,13 @@ class RecommendationBot:
         image_text = ""
         image_bytes = None
         image_file_url = None
+
+        # Check for show commands
+        if update.message.text:
+            msg = update.message.text.lower()
+            if any(kw in msg for kw in ["покажи список продуктов", "список продуктов", "что купить"]):
+                await self.show_grocery_list(update)
+                return
 
         # Process text message
         if update.message.text:

@@ -101,6 +101,28 @@ class NotionStorage:
             traceback.print_exc()
             return None
 
+    def get_by_category(self, category: str) -> list:
+        """Get all items for a given category."""
+        try:
+            response = self.client.databases.query(
+                database_id=self.database_id,
+                filter={"property": "Category", "select": {"equals": category}},
+                sorts=[{"property": "Timestamp", "direction": "descending"}]
+            )
+            results = []
+            for page in response.get("results", []):
+                props = page["properties"]
+                title = props.get("Title", {}).get("title", [{}])
+                context = props.get("Context", {}).get("rich_text", [{}])
+                results.append({
+                    "title": title[0].get("plain_text", "") if title else "",
+                    "context": context[0].get("plain_text", "") if context else "",
+                })
+            return results
+        except Exception as e:
+            print(f"Error fetching category {category}: {e}")
+            return []
+
     def save_recommendation(
         self,
         category: str,
