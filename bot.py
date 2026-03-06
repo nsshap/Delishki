@@ -1,7 +1,7 @@
 """Main Telegram bot for processing recommendations."""
 import re
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, validate_config
 from image_processor import process_image_message
 from llm_categorizer import LLMCategorizer
@@ -50,7 +50,7 @@ class RecommendationBot:
                 except Exception as e:
                     print(f"Error sending images: {e}")
 
-    async def handle_delete(self, update: Update, delete_req: dict):
+    async def handle_delete(self, update: Update, context: ContextTypes.DEFAULT_TYPE, delete_req: dict):
         """Handle delete request."""
         action = delete_req.get("action")
         category = delete_req.get("category")
@@ -60,8 +60,17 @@ class RecommendationBot:
             if not all_items:
                 await update.message.reply_text(f"Список *{category}* уже пуст.", parse_mode="Markdown")
                 return
-            count = self.storage.delete_pages([item["id"] for item in all_items])
-            await update.message.reply_text(f"✅ Удалено {count} записей из *{category}*.", parse_mode="Markdown")
+            # Ask for confirmation
+            context.user_data["pending_clear"] = {"category": category, "ids": [i["id"] for i in all_items]}
+            keyboard = [[
+                InlineKeyboardButton("✅ Да, удалить всё", callback_data="clear_confirm"),
+                InlineKeyboardButton("❌ Отмена", callback_data="clear_cancel"),
+            ]]
+            await update.message.reply_text(
+                f"Удалить весь список *{category}* ({len(all_items)} записей)?",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
         elif action == "delete_items":
             requested = delete_req.get("items", [])
@@ -74,6 +83,22 @@ class RecommendationBot:
             count = self.storage.delete_pages(ids_to_delete)
             lines = [f"✅ Удалено {count}:"] + [f"• {t}" for t in deleted_titles]
             await update.message.reply_text("\n".join(lines))
+
+    async def handle_clear_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle Yes/No confirmation for clear_list."""
+        query = update.callback_query
+        await query.answer()
+        if query.data == "clear_confirm":
+            pending = context.user_data.get("pending_clear")
+            if not pending:
+                await query.edit_message_text("Не нашла что удалять — попробуй ещё раз.")
+                return
+            count = self.storage.delete_pages(pending["ids"])
+            await query.edit_message_text(f"✅ Удалено {count} записей из *{pending['category']}*.", parse_mode="Markdown")
+            context.user_data.pop("pending_clear", None)
+        else:
+            await query.edit_message_text("Отменено.")
+            context.user_data.pop("pending_clear", None)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages."""
@@ -91,9 +116,9 @@ class RecommendationBot:
             if any(t in msg for t in delete_triggers):
                 delete_req = self.categorizer.identify_delete_request(update.message.text)
                 if delete_req:
-                    await self.handle_delete(update, delete_req)
+                    await self.handle_delete(update, context, delete_req)
                     return
-            if "покажи" in msg or "список" in msg or "что " in msg:
+            if "покажи" in msg or "что " in msg:
                 category = self.categorizer.identify_show_category(update.message.text)
                 if category:
                     await self.show_category(update, category)
@@ -189,13 +214,8 @@ class RecommendationBot:
         try:
             application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
             
-            # Add handler for all messages
-            application.add_handler(
-                MessageHandler(
-                    filters.TEXT | filters.PHOTO,
-                    self.handle_message
-                )
-            )
+            application.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, self.handle_message))
+            application.add_handler(CallbackQueryHandler(self.handle_clear_callback, pattern="^clear_"))
 
             print("Bot is running...")
             print("Press Ctrl+C to stop the bot.")
