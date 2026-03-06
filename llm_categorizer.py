@@ -9,6 +9,45 @@ class LLMCategorizer:
         self.client = OpenAI(api_key=OPENAI_API_KEY)
         self.categories = CATEGORIES
 
+    def identify_show_category(self, text: str) -> str | None:
+        """Detect if user is asking to show a category. Returns category name or None."""
+        categories_str = "\n".join([f"- {cat}" for cat in self.categories])
+        prompt = f"""Пользователь написал: "{text}"
+
+Он просит показать список какой-то категории? Если да — верни только название категории из списка ниже. Если нет — верни null.
+
+Категории:
+{categories_str}
+
+Примеры:
+- "покажи список продуктов" → "GroceryList"
+- "покажи фильмы" → "Movies"
+- "что почитать" → "Books"
+- "мои задачи" → "PersonalTodoList"
+- "покажи одежду" → "ShoppingClothes"
+- "привет как дела" → null
+
+Верни JSON: {{"category": "название или null"}}"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Отвечай только валидным JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0
+            )
+            result = json.loads(response.choices[0].message.content)
+            category = result.get("category")
+            if category and category != "null" and category in self.categories:
+                return category
+            return None
+        except Exception as e:
+            print(f"Error identifying show category: {e}")
+            return None
+
     def categorize(self, text: str, url: str = None, content_type: str = "text") -> dict:
         """Categorize recommendation using LLM.
         

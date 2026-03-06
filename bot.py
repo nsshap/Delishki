@@ -21,13 +21,13 @@ class RecommendationBot:
         match = url_pattern.search(text)
         return match.group(0) if match else ""
 
-    async def show_grocery_list(self, update: Update):
-        """Show all items in GroceryList category."""
-        items = self.storage.get_by_category("GroceryList")
+    async def show_category(self, update: Update, category: str):
+        """Show all items for a given category."""
+        items = self.storage.get_by_category(category)
         if not items:
-            await update.message.reply_text("🛒 Список продуктов пуст.")
+            await update.message.reply_text(f"Список *{category}* пуст.", parse_mode="Markdown")
             return
-        lines = ["🛒 *Список продуктов:*\n"]
+        lines = [f"*{category}* ({len(items)}):\n"]
         for item in items:
             title = item.get("title", "")
             context = item.get("context", "")
@@ -46,9 +46,11 @@ class RecommendationBot:
         # Check for show commands
         if update.message.text:
             msg = update.message.text.lower()
-            if any(kw in msg for kw in ["покажи список продуктов", "список продуктов", "что купить"]):
-                await self.show_grocery_list(update)
-                return
+            if "покажи" in msg or "список" in msg or "что " in msg:
+                category = self.categorizer.identify_show_category(update.message.text)
+                if category:
+                    await self.show_category(update, category)
+                    return
 
         # Process text message
         if update.message.text:
