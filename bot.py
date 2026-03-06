@@ -31,7 +31,7 @@ class RecommendationBot:
         for item in items:
             title = item.get("title", "")
             context = item.get("context", "")
-            lines.append(f"• {title}" + (f" — {context}" if context else ""))
+            lines.append(f"• {title}")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
