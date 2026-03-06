@@ -121,9 +121,13 @@ class NotionStorage:
                 props = page["properties"]
                 title = props.get("Title", {}).get("title", [{}])
                 context = props.get("Context", {}).get("rich_text", [{}])
+                url = props.get("URL", {}).get("url") or ""
+                files = props.get("Preview", {}).get("files", [])
+                image_url = files[0].get("file", {}).get("url", "") if files else ""
                 results.append({
                     "title": title[0].get("plain_text", "") if title else "",
-                    "context": context[0].get("plain_text", "") if context else "",
+                    "url": url,
+                    "image_url": image_url,
                 })
             return results
         except Exception as e:

@@ -23,16 +23,32 @@ class RecommendationBot:
 
     async def show_category(self, update: Update, category: str):
         """Show all items for a given category."""
+        from telegram import InputMediaPhoto
         items = self.storage.get_by_category(category)
         if not items:
             await update.message.reply_text(f"Список *{category}* пуст.", parse_mode="Markdown")
             return
         lines = [f"*{category}* ({len(items)}):\n"]
+        images = []
         for item in items:
-            title = item.get("title", "")
-            context = item.get("context", "")
-            lines.append(f"• {title}")
+            title = item.get("title", "") or "Без названия"
+            url = item.get("url", "")
+            image_url = item.get("image_url", "")
+            if url:
+                lines.append(f"• [{title}]({url})")
+            else:
+                lines.append(f"• {title}")
+            if image_url:
+                images.append(image_url)
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        if images:
+            for i in range(0, len(images), 10):
+                batch = images[i:i+10]
+                try:
+                    media = [InputMediaPhoto(media=img_url) for img_url in batch]
+                    await update.message.reply_media_group(media=media)
+                except Exception as e:
+                    print(f"Error sending images: {e}")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages."""
