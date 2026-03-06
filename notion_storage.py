@@ -134,6 +134,50 @@ class NotionStorage:
             print(f"Error fetching category {category}: {e}")
             return []
 
+    def get_all_in_category(self, category: str) -> list:
+        """Get all items (id + title) for a category."""
+        try:
+            response = requests.post(
+                f"https://api.notion.com/v1/databases/{self.database_id}/query",
+                headers={
+                    "Authorization": f"Bearer {NOTION_API_KEY}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type": "application/json"
+                },
+                json={"filter": {"property": "Category", "select": {"equals": category}}}
+            )
+            results = []
+            for page in response.json().get("results", []):
+                title = page["properties"].get("Title", {}).get("title", [{}])
+                results.append({
+                    "id": page["id"],
+                    "title": title[0].get("plain_text", "") if title else ""
+                })
+            return results
+        except Exception as e:
+            print(f"Error getting category items: {e}")
+            return []
+
+    def delete_pages(self, page_ids: list) -> int:
+        """Archive pages by ID. Returns count of deleted."""
+        count = 0
+        for page_id in page_ids:
+            try:
+                r = requests.patch(
+                    f"https://api.notion.com/v1/pages/{page_id}",
+                    headers={
+                        "Authorization": f"Bearer {NOTION_API_KEY}",
+                        "Notion-Version": "2022-06-28",
+                        "Content-Type": "application/json"
+                    },
+                    json={"archived": True}
+                )
+                if r.status_code == 200:
+                    count += 1
+            except Exception as e:
+                print(f"Error deleting page {page_id}: {e}")
+        return count
+
     def save_recommendation(
         self,
         category: str,

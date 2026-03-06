@@ -65,6 +65,87 @@ class LLMCategorizer:
             print(f"Error identifying show category: {e}")
             return None
 
+    def identify_delete_request(self, text: str) -> dict | None:
+        """Detect if user wants to delete items. Returns {action, category, items} or None."""
+        prompt = f"""Пользователь написал: "{text}"
+
+Он хочет удалить/вычеркнуть что-то из списка? Возможные варианты:
+- удалить конкретные пункты: "удали картошку", "я уже купила фейри", "я сделала позвонить врачу", "купила и картошку и молоко"
+- очистить весь список: "очисти весь список продуктов", "удали весь список дел"
+
+Категории и их алиасы:
+- GroceryList: список продуктов, продукты, покупки, список покупок
+- PersonalTodoList: мои дела, мои задачи, личные дела, список дел
+- FamilyTodoList: дела с Сашей, семейные дела, наши дела, совместные дела
+
+Если это запрос на удаление — верни JSON:
+{{
+  "action": "delete_items" или "clear_list",
+  "category": "название категории",
+  "items": ["что удалить 1", "что удалить 2"]
+}}
+
+Если это НЕ запрос на удаление — верни {{"action": null}}
+
+Примеры:
+- "удали картошку из списка" → {{"action": "delete_items", "category": "GroceryList", "items": ["картошка"]}}
+- "я уже купила фейри и молоко" → {{"action": "delete_items", "category": "GroceryList", "items": ["фейри", "молоко"]}}
+- "купила и картошку и фейри" → {{"action": "delete_items", "category": "GroceryList", "items": ["картошка", "фейри"]}}
+- "я уже сделала позвонить врачу" → {{"action": "delete_items", "category": "PersonalTodoList", "items": ["позвонить врачу"]}}
+- "очисти весь список продуктов" → {{"action": "clear_list", "category": "GroceryList", "items": []}}
+- "удали все мои дела" → {{"action": "clear_list", "category": "PersonalTodoList", "items": []}}
+- "добавь картошку" → {{"action": null}}
+- "покажи фильмы" → {{"action": null}}"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Отвечай только валидным JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0
+            )
+            result = json.loads(response.choices[0].message.content)
+            if result.get("action") is None:
+                return None
+            return result
+        except Exception as e:
+            print(f"Error identifying delete request: {e}")
+            return None
+
+    def match_items_to_delete(self, requested: list, actual: list) -> list:
+        """Match requested item names against actual titles in DB. Returns list of IDs."""
+        if not requested or not actual:
+            return []
+        actual_str = "\n".join([f'- id={item["id"]}: "{item["title"]}"' for item in actual])
+        requested_str = ", ".join([f'"{r}"' for r in requested])
+        prompt = f"""Пользователь хочет удалить: {requested_str}
+
+Вот что есть в базе:
+{actual_str}
+
+Найди совпадения (нечёткий поиск: падежи, опечатки, частичное совпадение).
+Верни JSON: {{"ids": ["id1", "id2"]}} — только те id, которые совпадают с запросом.
+Если ничего не совпадает — верни {{"ids": []}}"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Отвечай только валидным JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0
+            )
+            result = json.loads(response.choices[0].message.content)
+            return result.get("ids", [])
+        except Exception as e:
+            print(f"Error matching items: {e}")
+            return []
+
     def categorize(self, text: str, url: str = None, content_type: str = "text") -> dict:
         """Categorize recommendation using LLM.
         

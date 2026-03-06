@@ -50,6 +50,31 @@ class RecommendationBot:
                 except Exception as e:
                     print(f"Error sending images: {e}")
 
+    async def handle_delete(self, update: Update, delete_req: dict):
+        """Handle delete request."""
+        action = delete_req.get("action")
+        category = delete_req.get("category")
+
+        if action == "clear_list":
+            all_items = self.storage.get_all_in_category(category)
+            if not all_items:
+                await update.message.reply_text(f"Список *{category}* уже пуст.", parse_mode="Markdown")
+                return
+            count = self.storage.delete_pages([item["id"] for item in all_items])
+            await update.message.reply_text(f"✅ Удалено {count} записей из *{category}*.", parse_mode="Markdown")
+
+        elif action == "delete_items":
+            requested = delete_req.get("items", [])
+            all_items = self.storage.get_all_in_category(category)
+            ids_to_delete = self.categorizer.match_items_to_delete(requested, all_items)
+            if not ids_to_delete:
+                await update.message.reply_text("Не нашла таких записей в списке.")
+                return
+            deleted_titles = [item["title"] for item in all_items if item["id"] in ids_to_delete]
+            count = self.storage.delete_pages(ids_to_delete)
+            lines = [f"✅ Удалено {count}:"] + [f"• {t}" for t in deleted_titles]
+            await update.message.reply_text("\n".join(lines))
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages."""
         # Process all direct messages to the bot
@@ -59,9 +84,15 @@ class RecommendationBot:
         image_bytes = None
         image_file_url = None
 
-        # Check for show commands
+        # Check for delete/show commands
         if update.message.text:
             msg = update.message.text.lower()
+            delete_triggers = ["удали", "удалить", "вычеркни", "уже купила", "уже купил", "уже сделала", "уже сделал", "очисти", "убери"]
+            if any(t in msg for t in delete_triggers):
+                delete_req = self.categorizer.identify_delete_request(update.message.text)
+                if delete_req:
+                    await self.handle_delete(update, delete_req)
+                    return
             if "покажи" in msg or "список" in msg or "что " in msg:
                 category = self.categorizer.identify_show_category(update.message.text)
                 if category:
