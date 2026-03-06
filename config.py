@@ -69,6 +69,9 @@ CATEGORIES = [
     "LeisureIdeas",
     "TravelIdeas",
     "ShoppingHome",
+    "PersonalTodoList",
+    "FamilyTodoList",
+    "Courses",
     "Other"
 ]
 
