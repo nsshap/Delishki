@@ -73,6 +73,7 @@ CATEGORIES = [
     "FamilyTodoList",
     "Courses",
     "GroceryList",
+    "GiftIdeas",
     "Other"
 ]
 
