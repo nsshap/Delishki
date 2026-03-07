@@ -160,7 +160,10 @@ class NotionStorage:
                     "Notion-Version": "2022-06-28",
                     "Content-Type": "application/json"
                 },
-                json={"filter": {"property": "Category", "select": {"equals": category}}}
+                json={
+                    "filter": {"property": "Category", "select": {"equals": category}},
+                    "sorts": [{"property": "Timestamp", "direction": "descending"}]
+                }
             )
             results = []
             for page in response.json().get("results", []):
