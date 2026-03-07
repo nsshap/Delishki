@@ -239,45 +239,45 @@ class RecommendationBot:
         image_file_url = None
 
         # Transcribe voice/audio to text
+        text_input = update.message.text or ""
         if update.message.voice or update.message.audio:
             transcribed = await transcribe_audio(update, context)
             if not transcribed:
                 await update.message.reply_text("Не удалось распознать аудио.")
                 return
-            # Inject as text and process normally
-            update.message.text = transcribed
+            text_input = transcribed
             await update.message.reply_text(f"🎤 Распознано: {transcribed}")
 
         # Check for delete/show/add commands
-        if update.message.text:
-            msg = update.message.text.lower()
+        if text_input:
+            msg = text_input.lower()
             last_shown = context.user_data.get("last_shown", {})
 
             delete_triggers = ["удали", "удалить", "вычеркни", "уже купила", "уже купил", "уже сделала", "уже сделал", "очисти", "убери"]
             add_triggers = ["добавь", "добавить", "добавляй", "купи ", "купить "]
 
             if any(t in msg for t in delete_triggers):
-                delete_req = self.categorizer.identify_delete_request(update.message.text)
+                delete_req = self.categorizer.identify_delete_request(text_input)
                 if delete_req:
                     await self.handle_delete(update, context, delete_req)
                     return
 
             if any(t in msg for t in add_triggers) or (last_shown.get("category") and ("," in msg or "\n" in msg)):
                 context_category = last_shown.get("category")
-                bulk = self.categorizer.identify_bulk_add(update.message.text, context_category)
+                bulk = self.categorizer.identify_bulk_add(text_input, context_category)
                 if bulk:
                     await self.handle_bulk_add(update, bulk)
                     return
 
             if "покажи" in msg or "что " in msg:
-                category = self.categorizer.identify_show_category(update.message.text)
+                category = self.categorizer.identify_show_category(text_input)
                 if category:
                     await self.show_category(update, context, category)
                     return
 
         # Process text message
-        if update.message.text:
-            text = update.message.text
+        if text_input:
+            text = text_input
             urls.extend(self.extract_urls(text))
 
         # Process image (screenshot)
