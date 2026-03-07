@@ -194,6 +194,112 @@ class LLMCategorizer:
             print(f"Error matching items: {e}")
             return []
 
+    def categorize_multiple(self, text: str, urls: list = None, content_type: str = "text") -> dict:
+        """Detect and categorize one or more recommendations from a single message.
+
+        Returns:
+            {
+                "needs_clarification": bool,
+                "question": str | None,
+                "items": list[dict]  # each has category/title/description/url/tags/confidence
+            }
+        """
+        if not text or not text.strip():
+            return {"needs_clarification": False, "question": None, "items": []}
+
+        categories_str = "\n".join([f"- {cat}" for cat in self.categories])
+        urls_str = f"\nСсылки в сообщении: {', '.join(urls)}" if urls else ""
+
+        prompt = f"""Проанализируй сообщение пользователя. Он хочет сохранить одну или несколько рекомендаций.
+
+Сообщение: "{text}"{urls_str}
+
+ПРАВИЛА определения количества записей:
+1. Явное перечисление нескольких объектов → отдельная запись для каждого:
+   "книги: Атомные привычки, Антихрупкость" → 2 записи Books
+   "книга X и фильм Y" → 2 записи в разных категориях
+   "посмотри https://A.com и прочитай https://B.com" → 2 записи
+2. Один объект → одна запись:
+   "фильм Дюна — крутая фантастика" → 1 запись Movies
+   "https://somelink.com" → 1 запись
+3. Если НЕЯСНО сколько записей создавать (не путать с неясной категорией!) — задай вопрос:
+   "книги по продуктивности" — непонятно: это одна книга с таким названием, или нужно несколько?
+   Задавай вопрос ТОЛЬКО в редких случаях реальной неоднозначности.
+
+Доступные категории:
+{categories_str}
+
+Правила категоризации:
+- Books: книги, аудиокниги, литература
+- Movies: фильмы, сериалы, YouTube, подкасты, что посмотреть
+- ShoppingClothes: одежда, обувь, аксессуары, гардероб
+- WorkReading: статьи про продакт-менеджмент, IT, профессиональные блоги, материалы для работы
+- LeisureIdeas: театры, концерты, выставки, мероприятия, куда сходить
+- TravelIdeas: места для путешествий, отели, маршруты, рестораны в других городах
+- ShoppingHome: товары для дома, мебель, декор, бытовая техника
+- PersonalTodoList: личные задачи, "надо сделать", "не забыть"
+- FamilyTodoList: задачи с упоминанием Саши или семьи
+- Courses: онлайн-курсы, мастер-классы, образование
+- GroceryList: список продуктов, еда, напитки, бытовая химия
+- Other: всё остальное
+- Для ссылок: youtube.com → Movies, amazon.com → Shopping*, booking.com → TravelIdeas
+
+Верни JSON:
+{{
+  "needs_clarification": false,
+  "question": null,
+  "items": [
+    {{
+      "category": "категория из списка",
+      "title": "краткое название (до 100 символов)",
+      "description": "описание (до 500 символов)",
+      "url": "ссылка или пустая строка",
+      "tags": ["тег1", "тег2"],
+      "confidence": 0.9
+    }}
+  ]
+}}
+
+Или если нужно уточнение:
+{{
+  "needs_clarification": true,
+  "question": "Конкретный вопрос пользователю о количестве записей",
+  "items": []
+}}"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Ты помощник для категоризации рекомендаций. Отвечай только валидным JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            result = json.loads(response.choices[0].message.content)
+
+            if result.get("needs_clarification"):
+                return {"needs_clarification": True, "question": result.get("question"), "items": []}
+
+            validated = []
+            for item in result.get("items", []):
+                if item.get("category") not in self.categories:
+                    item["category"] = "Other"
+                item.setdefault("tags", [])
+                item.setdefault("confidence", 0.7)
+                item.setdefault("url", "")
+                item.setdefault("description", "")
+                if item.get("category") == "Other":
+                    print(f"[OTHER LOG] title={item.get('title')!r} | text={text[:200]!r}")
+                validated.append(item)
+
+            return {"needs_clarification": False, "question": None, "items": validated}
+
+        except Exception as e:
+            print(f"Error in categorize_multiple: {e}")
+            return {"needs_clarification": False, "question": None, "items": []}
+
     def categorize(self, text: str, url: str = None, content_type: str = "text") -> dict:
         """Categorize recommendation using LLM.
         

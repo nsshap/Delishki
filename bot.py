@@ -15,12 +15,82 @@ class RecommendationBot:
         self.storage = get_storage()
 
     def extract_url(self, text: str) -> str:
-        """Extract URL from text."""
+        """Extract first URL from text."""
         url_pattern = re.compile(
             r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
         )
         match = url_pattern.search(text)
         return match.group(0) if match else ""
+
+    def extract_urls(self, text: str) -> list:
+        """Extract all URLs from text."""
+        url_pattern = re.compile(
+            r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+        )
+        return url_pattern.findall(text)
+
+    async def _process_recommendation(
+        self, update, context, text: str, urls: list,
+        content_type: str, image_file_url: str = None, image_bytes: bytes = None
+    ):
+        """Categorize and save one or more recommendations. Handles clarification flow."""
+        result = self.categorizer.categorize_multiple(text, urls, content_type)
+
+        if result["needs_clarification"]:
+            context.user_data["pending_clarification"] = {
+                "text": text,
+                "urls": urls,
+                "content_type": content_type,
+                "image_file_url": image_file_url,
+                "image_bytes": image_bytes,
+            }
+            await update.message.reply_text(result["question"])
+            return
+
+        items = result["items"]
+        if not items:
+            await update.message.reply_text("❌ Не удалось определить рекомендацию.")
+            return
+
+        saved, failed = [], []
+        for item in items:
+            final_url = item.get("url") or (urls[0] if urls else "")
+            success = self.storage.save_recommendation(
+                category=item["category"],
+                title=item["title"],
+                context=item.get("description", ""),
+                url=final_url,
+                tags=item.get("tags", []),
+                confidence=item.get("confidence", 0.7),
+                raw_input=text,
+                telegram_chat_id=update.message.chat.id,
+                telegram_message_id=update.message.message_id,
+                image_url=image_file_url,
+                image_bytes=image_bytes,
+            )
+            if success:
+                saved.append(item)
+            else:
+                failed.append(item)
+
+        if len(saved) == 1:
+            item = saved[0]
+            await update.message.reply_text(
+                f"✅ Рекомендация сохранена!\n"
+                f"Категория: {item['category']}\n"
+                f"Название: {item['title']}"
+            )
+        elif len(saved) > 1:
+            lines = [f"✅ Сохранено {len(saved)}:"]
+            for item in saved:
+                lines.append(f"• {item['title']} → {item['category']}")
+            if failed:
+                lines.append(f"\n❌ Не удалось сохранить {len(failed)}:")
+                for item in failed:
+                    lines.append(f"• {item['title']}")
+            await update.message.reply_text("\n".join(lines))
+        else:
+            await update.message.reply_text("❌ Ошибка при сохранении рекомендаций.")
 
     async def show_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE, category: str):
         """Show all items for a given category."""
@@ -147,9 +217,23 @@ class RecommendationBot:
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages."""
+        # Handle pending clarification before any other checks
+        if update.message.text and context.user_data.get("pending_clarification"):
+            pending = context.user_data.pop("pending_clarification")
+            clarified_text = f"{pending['text']}\nПояснение: {update.message.text}"
+            await self._process_recommendation(
+                update, context,
+                clarified_text,
+                pending.get("urls", []),
+                pending.get("content_type", "text"),
+                pending.get("image_file_url"),
+                pending.get("image_bytes"),
+            )
+            return
+
         # Process all direct messages to the bot
         text = ""
-        url = ""
+        urls = []
         image_text = ""
         image_bytes = None
         image_file_url = None
@@ -194,7 +278,7 @@ class RecommendationBot:
         # Process text message
         if update.message.text:
             text = update.message.text
-            url = self.extract_url(text)
+            urls.extend(self.extract_urls(text))
 
         # Process image (screenshot)
         image_bytes = None
@@ -203,14 +287,11 @@ class RecommendationBot:
                 image_text, image_bytes = await process_image_message(update, context)
                 if image_text:
                     text = f"{text}\n{image_text}".strip() if text else image_text
-                    # Try to extract URL from image text
-                    if not url:
-                        url = self.extract_url(image_text)
-                
+                    urls.extend(self.extract_urls(image_text))
+
                 # Get Telegram file URL for the image
                 photo = update.message.photo[-1]
                 file = await context.bot.get_file(photo.file_id)
-                # Construct full URL to Telegram file
                 image_file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file.file_path}"
             except Exception as e:
                 print(f"Error processing image: {e}")
@@ -220,58 +301,26 @@ class RecommendationBot:
         if update.message.caption:
             caption = update.message.caption
             text = f"{text}\n{caption}".strip() if text else caption
-            if not url:
-                url = self.extract_url(caption)
+            urls.extend(self.extract_urls(caption))
+
+        # Deduplicate URLs while preserving order
+        urls = list(dict.fromkeys(urls))
 
         # If no text extracted, skip
         if not text or not text.strip():
             await update.message.reply_text("Не удалось извлечь текст из сообщения.")
             return
 
-        # Store raw input
-        raw_input = text
-        
         # Determine content type
         if image_bytes:
-            if update.message.caption:
-                content_type = "image_with_text"
-            else:
-                content_type = "image"
-        elif url:
+            content_type = "image_with_text" if update.message.caption else "image"
+        elif urls:
             content_type = "link"
         else:
             content_type = "text"
-        
-        # Categorize using LLM
-        try:
-            result = self.categorizer.categorize(text, url, content_type)
-            
-            # Use extracted URL if available, otherwise use URL from LLM result
-            final_url = url if url else result.get("url", "")
-            
-            # Save to storage
-            success = self.storage.save_recommendation(
-                category=result["category"],
-                title=result["title"],
-                context=result.get("description", ""),
-                url=final_url,
-                tags=result.get("tags", []),
-                confidence=result.get("confidence", 0.7),
-                raw_input=raw_input,
-                telegram_chat_id=update.message.chat.id,
-                telegram_message_id=update.message.message_id,
-                image_url=image_file_url,
-                image_bytes=image_bytes
-            )
 
-            if success:
-                await update.message.reply_text(
-                    f"✅ Рекомендация сохранена!\n"
-                    f"Категория: {result['category']}\n"
-                    f"Название: {result['title']}"
-                )
-            else:
-                await update.message.reply_text("❌ Ошибка при сохранении рекомендации.")
+        try:
+            await self._process_recommendation(update, context, text, urls, content_type, image_file_url, image_bytes)
         except Exception as e:
             print(f"Error processing recommendation: {e}")
             await update.message.reply_text(f"❌ Ошибка: {str(e)}")
