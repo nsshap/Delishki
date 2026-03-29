@@ -1,7 +1,11 @@
-"""Flask server that serves the ShoppingHome gallery."""
+"""Flask server that serves the ShoppingHome gallery.
+
+Images are proxied through /img/<page_id> to always get fresh Notion S3 URLs.
+The DB query returns stale signed URLs; fetching a page by ID returns fresh ones.
+Image bytes are cached in memory for 45 minutes.
+"""
 import os
-import base64
-import json
+import time
 import requests
 from flask import Flask, Response
 from dotenv import load_dotenv
@@ -18,11 +22,15 @@ app = Flask(__name__)
 HEADERS_NOTION = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
     "Notion-Version": "2022-06-28",
-    "Content-Type": "application/json",
 }
+
+# {page_id: (bytes, mime_type, fetched_at)}
+_img_cache: dict[str, tuple[bytes, str, float]] = {}
+IMG_CACHE_TTL = 45 * 60  # 45 minutes
 
 
 def fetch_items():
+    """Fetch all ShoppingHome items. image_url is replaced by /img/<page_id> proxy."""
     all_items = []
     cursor = None
     while True:
@@ -35,7 +43,7 @@ def fetch_items():
             body["start_cursor"] = cursor
         r = requests.post(
             f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query",
-            headers=HEADERS_NOTION,
+            headers={**HEADERS_NOTION, "Content-Type": "application/json"},
             json=body,
         )
         data = r.json()
@@ -44,18 +52,54 @@ def fetch_items():
             title_parts = props.get("Title", {}).get("title", [])
             context_parts = props.get("Context", {}).get("rich_text", [])
             url = props.get("URL", {}).get("url") or ""
-            files = props.get("Preview", {}).get("files", [])
-            image_url = files[0].get("file", {}).get("url", "") if files else ""
+            has_image = bool(props.get("Preview", {}).get("files"))
+            page_id = page["id"]
             all_items.append({
+                "page_id": page_id,
                 "title": title_parts[0].get("plain_text", "") if title_parts else "",
                 "context": context_parts[0].get("plain_text", "") if context_parts else "",
                 "url": url,
-                "image_url": image_url,
+                "image_url": f"/img/{page_id}" if has_image else "",
             })
         if not data.get("has_more"):
             break
         cursor = data.get("next_cursor")
     return all_items
+
+
+def get_fresh_image(page_id: str) -> tuple[bytes, str] | tuple[None, None]:
+    """Fetch page by ID to get a fresh S3 URL, then download the image."""
+    page = requests.get(
+        f"https://api.notion.com/v1/pages/{page_id}",
+        headers=HEADERS_NOTION,
+    ).json()
+    files = page.get("properties", {}).get("Preview", {}).get("files", [])
+    if not files:
+        return None, None
+    img_url = files[0].get("file", {}).get("url", "")
+    if not img_url:
+        return None, None
+    resp = requests.get(img_url, timeout=20)
+    if resp.status_code != 200:
+        return None, None
+    mime = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+    return resp.content, mime
+
+
+@app.route("/img/<page_id>")
+def proxy_image(page_id):
+    now = time.time()
+    cached = _img_cache.get(page_id)
+    if cached and now - cached[2] < IMG_CACHE_TTL:
+        data, mime, _ = cached
+        return Response(data, content_type=mime)
+
+    data, mime = get_fresh_image(page_id)
+    if data is None:
+        return Response(status=404)
+
+    _img_cache[page_id] = (data, mime, now)
+    return Response(data, content_type=mime)
 
 
 def build_card(item):
