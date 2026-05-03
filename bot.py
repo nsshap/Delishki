@@ -1,5 +1,6 @@
 """Main Telegram bot for processing recommendations."""
 import re
+import traceback
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, validate_config
@@ -325,13 +326,21 @@ class RecommendationBot:
             print(f"Error processing recommendation: {e}")
             await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
+    async def handle_error(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        """Log errors and notify user."""
+        error_text = "".join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__))
+        print(f"Exception while handling update:\n{error_text}")
+        if isinstance(update, Update) and update.effective_message:
+            await update.effective_message.reply_text(f"❌ Ошибка: {context.error}")
+
     def run(self):
         """Run the bot."""
         try:
             application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-            
+
             application.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO, self.handle_message))
             application.add_handler(CallbackQueryHandler(self.handle_clear_callback, pattern="^clear_"))
+            application.add_error_handler(self.handle_error)
 
             print("Bot is running...")
             print("Press Ctrl+C to stop the bot.")
